@@ -1,0 +1,95 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saga
+      POSTGRES_PASSWORD: saga
+      POSTGRES_DB: saga
+    volumes:
+      - ./scripts/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saga"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      retries: 5
+
+  wallet:
+    build:
+      context: .
+      args: { SERVICE: wallet }
+    environment:
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      INTERNAL_TOKEN: dev-internal-token
+      GIN_MODE: release
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8081:8080"]
+
+  risk:
+    build:
+      context: .
+      args: { SERVICE: risk }
+    environment:
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      GIN_MODE: release
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8082:8080"]
+
+  notification:
+    build:
+      context: .
+      args: { SERVICE: notification }
+    environment:
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      GIN_MODE: release
+    depends_on:
+      postgres:  { condition: service_healthy }
+      rabbitmq:  { condition: service_healthy }
+    ports: ["8083:8080"]
+
+  orchestrator:
+    build:
+      context: .
+      args: { SERVICE: orchestrator }
+    environment:
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      WALLET_URL: http://wallet:8080
+      RISK_URL: http://risk:8080
+      INTERNAL_TOKEN: dev-internal-token
+      IDEMPOTENCY_CACHE: ${IDEMPOTENCY_CACHE:-redis}  # toggle: redis | postgres
+      PAUSE_AFTER: ${PAUSE_AFTER:-}
+      GIN_MODE: release
+    depends_on:
+      postgres:  { condition: service_healthy }
+      redis:     { condition: service_healthy }
+      rabbitmq:  { condition: service_healthy }
+      wallet:    { condition: service_started }
+      risk:      { condition: service_started }
+    ports: ["8090:8080"]
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports: ["9091:9090"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
