@@ -79,6 +79,7 @@ services:
       INTERNAL_TOKEN: dev-internal-token
       IDEMPOTENCY_CACHE: ${IDEMPOTENCY_CACHE:-redis}  # toggle: redis | postgres
       PAUSE_AFTER: ${PAUSE_AFTER:-}
+      SLOW_NOTIFICATION: ${SLOW_NOTIFICATION:-}  
       GIN_MODE: release
     depends_on:
       postgres:  { condition: service_healthy }
